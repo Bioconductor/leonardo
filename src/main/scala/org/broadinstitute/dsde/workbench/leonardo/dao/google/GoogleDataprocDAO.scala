@@ -29,4 +29,6 @@ trait GoogleDataprocDAO {
   def resizeCluster(googleProject: GoogleProject, clusterName: ClusterName, numWorkers: Option[Int] = None, numPreemptibles: Option[Int] = None): Future[Unit]
 
   def getUserInfoAndExpirationFromAccessToken(accessToken: String): Future[(UserInfo, Instant)]
+
+  def getClusterGoogleId(googleProject: GoogleProject, clusterName: ClusterName): Future[Option[UUID]]
 }

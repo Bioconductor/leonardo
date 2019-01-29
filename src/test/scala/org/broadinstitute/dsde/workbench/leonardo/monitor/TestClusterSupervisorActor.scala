@@ -8,7 +8,7 @@ import org.broadinstitute.dsde.workbench.leonardo.dao.JupyterDAO
 import org.broadinstitute.dsde.workbench.leonardo.dao.google.{GoogleComputeDAO, GoogleDataprocDAO}
 import org.broadinstitute.dsde.workbench.leonardo.db.DbReference
 import org.broadinstitute.dsde.workbench.leonardo.model.{Cluster, LeoAuthProvider}
-import org.broadinstitute.dsde.workbench.leonardo.service.LeonardoService
+import org.broadinstitute.dsde.workbench.leonardo.service.{BackLeoService, LeonardoService}
 
 object TestClusterSupervisorActor {
   def props(monitorConfig: MonitorConfig,
@@ -22,10 +22,11 @@ object TestClusterSupervisorActor {
             authProvider: LeoAuthProvider,
             autoFreezeConfig: AutoFreezeConfig,
             jupyterProxyDAO: JupyterDAO,
-            leonardoService: LeonardoService): Props =
+            leonardoService: LeonardoService,
+            backLeoService: BackLeoService): Props =
     Props(new TestClusterSupervisorActor(
       monitorConfig, dataprocConfig, gdDAO, googleComputeDAO, googleIamDAO, googleStorageDAO,
-      dbRef, testKit, authProvider, autoFreezeConfig, jupyterProxyDAO, leonardoService))
+      dbRef, testKit, authProvider, autoFreezeConfig, jupyterProxyDAO, leonardoService, backLeoService))
 }
 
 object TearDown
@@ -44,11 +45,12 @@ class TestClusterSupervisorActor(monitorConfig: MonitorConfig,
                                  authProvider: LeoAuthProvider,
                                  autoFreezeConfig: AutoFreezeConfig,
                                  jupyterProxyDAO: JupyterDAO,
-                                 leonardoService: LeonardoService)
+                                 leonardoService: LeonardoService,
+                                 backLeoService: BackLeoService)
   extends ClusterMonitorSupervisor(
     monitorConfig, dataprocConfig, gdDAO, googleComputeDAO,
     googleIamDAO, googleStorageDAO, dbRef,
-    authProvider, autoFreezeConfig, jupyterProxyDAO, leonardoService) {
+    authProvider, autoFreezeConfig, jupyterProxyDAO, leonardoService, backLeoService) {
 
   // Keep track of spawned child actors so we can shut them down when this actor is stopped
   var childActors: Seq[ActorRef] = Seq.empty

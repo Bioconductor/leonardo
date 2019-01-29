@@ -1,6 +1,7 @@
 package org.broadinstitute.dsde.workbench.leonardo.monitor
 
 import java.time.Instant
+import java.util.UUID
 
 import akka.actor.Status.Failure
 import akka.actor.{Actor, ActorSystem, Props}
@@ -20,6 +21,7 @@ import org.broadinstitute.dsde.workbench.leonardo.model.google.ClusterStatus._
 import org.broadinstitute.dsde.workbench.leonardo.model.google.{ClusterStatus, IP, _}
 import org.broadinstitute.dsde.workbench.leonardo.monitor.ClusterMonitorActor._
 import org.broadinstitute.dsde.workbench.leonardo.monitor.ClusterMonitorSupervisor.{ClusterDeleted, ClusterSupervisorMessage, RemoveFromList}
+import org.broadinstitute.dsde.workbench.leonardo.service.BackLeoService
 import org.broadinstitute.dsde.workbench.util.{Retry, addJitter}
 import slick.dbio.DBIOAction
 
@@ -31,8 +33,8 @@ object ClusterMonitorActor {
   /**
     * Creates a Props object used for creating a {{{ClusterMonitorActor}}}.
     */
-  def props(cluster: Cluster, monitorConfig: MonitorConfig, dataprocConfig: DataprocConfig, gdDAO: GoogleDataprocDAO, googleComputeDAO: GoogleComputeDAO, googleIamDAO: GoogleIamDAO, googleStorageDAO: GoogleStorageDAO, dbRef: DbReference, authProvider: LeoAuthProvider, jupyterProxyDAO: JupyterDAO): Props =
-    Props(new ClusterMonitorActor(cluster, monitorConfig, dataprocConfig, gdDAO, googleComputeDAO, googleIamDAO, googleStorageDAO, dbRef, authProvider, jupyterProxyDAO))
+  def props(cluster: Cluster, monitorConfig: MonitorConfig, dataprocConfig: DataprocConfig, gdDAO: GoogleDataprocDAO, googleComputeDAO: GoogleComputeDAO, googleIamDAO: GoogleIamDAO, googleStorageDAO: GoogleStorageDAO, dbRef: DbReference, authProvider: LeoAuthProvider, jupyterProxyDAO: JupyterDAO, backLeoService: BackLeoService): Props =
+    Props(new ClusterMonitorActor(cluster, monitorConfig, dataprocConfig, gdDAO, googleComputeDAO, googleIamDAO, googleStorageDAO, dbRef, authProvider, jupyterProxyDAO, backLeoService))
 
   // ClusterMonitorActor messages:
 
@@ -64,7 +66,8 @@ class ClusterMonitorActor(val cluster: Cluster,
                           val googleStorageDAO: GoogleStorageDAO,
                           val dbRef: DbReference,
                           val authProvider: LeoAuthProvider,
-                          val jupyterProxyDAO: JupyterDAO) extends Actor with LazyLogging with Retry {
+                          val jupyterProxyDAO: JupyterDAO,
+                          val backLeoService: BackLeoService) extends Actor with LazyLogging with Retry {
   import context._
 
   // the Retry trait needs a reference to the ActorSystem
@@ -270,15 +273,27 @@ class ClusterMonitorActor(val cluster: Cluster,
   private def checkClusterInGoogle(leoClusterStatus: ClusterStatus): Future[ClusterMonitorMessage] = {
     for {
       googleStatus <- gdDAO.getClusterStatus(cluster.googleProject, cluster.clusterName)
-
+      a = logger.info("google cluster status:: " + googleStatus)
       googleInstances <- getClusterInstances
 
       runningInstanceCount = googleInstances.count(_.status == InstanceStatus.Running)
       stoppedInstanceCount = googleInstances.count(i => i.status == InstanceStatus.Stopped || i.status == InstanceStatus.Terminated)
 
       result <- googleStatus match {
-        case Unknown | Creating | Updating =>
+        case Unknown if cluster.status ==Creating => cluster.dataprocInfo.googleId  match {
+          case Some(_) => Future.successful(NotReadyCluster(googleStatus, googleInstances))
+          case None => backLeoService.completeClusterCreation(cluster.auditInfo.creator, cluster,cluster.clusterRequest).map(_ => ShutdownActor(RemoveFromList(cluster)))
+        }
+        case Updating | Unknown =>
           Future.successful(NotReadyCluster(googleStatus, googleInstances))
+        case Creating =>
+          cluster.dataprocInfo.googleId  match {
+          case Some(_) => Future.successful(NotReadyCluster(googleStatus, googleInstances))
+          case None => gdDAO.getClusterGoogleId(cluster.googleProject, cluster.clusterName).flatMap {
+            case Some(uuid: UUID) => dbRef.inTransaction(_.clusterQuery.updateGoogleUUID(cluster.id, Some(uuid))).map { _ => ShutdownActor(RemoveFromList(cluster))}
+            case None => Future.successful(NotReadyCluster(googleStatus, googleInstances))
+          }
+      }
         // Take care we don't restart a Deleting or Stopping cluster if google hasn't updated their status yet
         case Running if leoClusterStatus != Deleting && leoClusterStatus != Stopping && leoClusterStatus != Starting && runningInstanceCount == googleInstances.size =>
           getMasterIp.map {

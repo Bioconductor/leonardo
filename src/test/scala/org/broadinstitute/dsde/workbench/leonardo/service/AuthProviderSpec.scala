@@ -69,7 +69,7 @@ class AuthProviderSpec extends FreeSpec with ScalatestRouteTest with Matchers wi
       val proxy = proxyWithAuthProvider(spyProvider)
 
       // create
-      val cluster1 = leo.createCluster(userInfo, project, cluster1Name, testClusterRequest).futureValue
+      val cluster1 = leo.processClusterCreationRequest(userInfo, project, cluster1Name, testClusterRequest).futureValue
 
       // get status
       val clusterStatus = leo.getActiveClusterDetails(userInfo, project, cluster1Name).futureValue
@@ -107,7 +107,7 @@ class AuthProviderSpec extends FreeSpec with ScalatestRouteTest with Matchers wi
       val proxy = proxyWithAuthProvider(spyProvider)
 
       //can't make a cluster
-      val clusterCreateException = leo.createCluster(userInfo, project, cluster1Name, testClusterRequest).failed.futureValue
+      val clusterCreateException = leo.processClusterCreationRequest(userInfo, project, cluster1Name, testClusterRequest).failed.futureValue
       clusterCreateException shouldBe a [AuthorizationError]
       clusterCreateException.asInstanceOf[AuthorizationError].statusCode shouldBe StatusCodes.Forbidden
 
@@ -181,7 +181,7 @@ class AuthProviderSpec extends FreeSpec with ScalatestRouteTest with Matchers wi
       val spyProvider = spy(badNotifyProvider)
       val leo = leoWithAuthProvider(spyProvider)
 
-      val clusterCreateExc = leo.createCluster(userInfo, project, cluster1Name, testClusterRequest).failed.futureValue
+      val clusterCreateExc = leo.processClusterCreationRequest(userInfo, project, cluster1Name, testClusterRequest).failed.futureValue
       clusterCreateExc shouldBe a [RuntimeException]
 
       // no cluster should have been made

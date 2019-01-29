@@ -211,6 +211,14 @@ class HttpGoogleDataprocDAO(appName: String,
       }
   }
 
+  override def getClusterGoogleId(googleProject: GoogleProject, clusterName: ClusterName): Future[Option[UUID]] = {
+    val transformed = for {
+      cluster <- OptionT(getCluster(googleProject, clusterName))
+    } yield UUID.fromString(cluster.getClusterUuid)
+
+    transformed.value.handleGoogleException(googleProject, clusterName)
+  }
+
   private def getClusterConfig(machineConfig: MachineConfig, initScript: GcsPath, clusterServiceAccount: Option[WorkbenchEmail], credentialsFileName: Option[String], stagingBucket: GcsBucketName, clusterScopes: Set[String]): DataprocClusterConfig = {
     // Create a GceClusterConfig, which has the common config settings for resources of Google Compute Engine cluster instances,
     // applicable to all instances in the cluster.

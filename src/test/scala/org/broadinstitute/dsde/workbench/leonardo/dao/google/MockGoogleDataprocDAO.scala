@@ -79,6 +79,10 @@ class MockGoogleDataprocDAO(ok: Boolean = true) extends GoogleDataprocDAO {
     Future.successful(None)
   }
 
+  override def getClusterGoogleId(googleProject: GoogleProject, clusterName: ClusterName): Future[Option[UUID]] = {
+    Future.successful(Some(UUID.randomUUID()))
+  }
+
   override def getUserInfoAndExpirationFromAccessToken(accessToken: String): Future[(UserInfo, Instant)] = {
     Future.successful {
       accessToken match {

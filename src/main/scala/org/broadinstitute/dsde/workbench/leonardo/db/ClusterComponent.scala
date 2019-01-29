@@ -316,6 +316,10 @@ trait ClusterComponent extends LeoComponent {
       findByIdQuery(id).map(_.numberOfPreemptibleWorkers).update(numberOfPreemptibleWorkers)
     }
 
+    def updateGoogleUUID(id: Long, googleId: Option[UUID]): DBIO[Int] = {
+      findByIdQuery(id).map(_.googleId).update(googleId)
+    }
+
     def setToRunning(id: Long, hostIp: IP): DBIO[Int] = {
       updateClusterStatusAndHostIp(id, ClusterStatus.Running, Some(hostIp))
     }

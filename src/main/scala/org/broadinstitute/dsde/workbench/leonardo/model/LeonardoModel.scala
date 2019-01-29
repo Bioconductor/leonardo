@@ -97,6 +97,13 @@ case class Cluster(id: Long = 0, // DB AutoInc
                    scopes: Set[String]) {
   def projectNameString: String = s"${googleProject.value}/${clusterName.value}"
   def nonPreemptibleInstances: Set[Instance] = instances.filterNot(_.dataprocRole.contains(SecondaryWorker))
+
+  def clusterRequest: ClusterRequest = ClusterRequest(Some(labels),
+    jupyterExtensionUri,
+    jupyterUserScriptUri,
+    Some(machineConfig),
+    Some(stopAfterCreation),
+    userJupyterExtensionConfig,Some(true), Some(autopauseThreshold), defaultClientId, None, Some(scopes))
 }
 object Cluster {
   type LabelMap = Map[String, String]

@@ -236,7 +236,8 @@ case class ClusterInitValues(googleProject: String,
                              jupyterCombinedExtensions: String,
                              jupyterNotebookConfigUri: String,
                              jupyterLabExtensions: String,
-                             defaultClientId: String
+                             defaultClientId: String,
+                             welderDockerImage: String
                             ){
   def toMap: Map[String, String] = this.getClass.getDeclaredFields.map(_.getName).zip(this.productIterator.to).toMap.mapValues(_.toString)}
 
@@ -276,7 +277,8 @@ object ClusterInitValues {
       clusterRequest.userJupyterExtensionConfig.map(x => x.combinedExtensions.values.mkString(" ")).getOrElse(""),
       GcsPath(initBucketName, GcsObjectName(clusterResourcesConfig.jupyterNotebookConfigUri.value)).toUri,
       clusterRequest.userJupyterExtensionConfig.map(x => x.labExtensions.values.mkString(" ")).getOrElse(""),
-      clusterRequest.defaultClientId.getOrElse("")
+      clusterRequest.defaultClientId.getOrElse(""),
+      dataprocConfig.welderDockerImage
     )
 }
 

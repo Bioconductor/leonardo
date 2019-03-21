@@ -213,12 +213,14 @@ case class ClusterInitValues(googleProject: String,
                              jupyterDockerImage: String,
                              rstudioDockerImage: String,
                              proxyDockerImage: String,
+                             welderDockerImage: String,
                              jupyterServerCrt: String,
                              jupyterServerKey: String,
                              rootCaPem: String,
                              jupyterDockerCompose: String,
                              rstudioDockerCompose: String,
                              proxyDockerCompose: String,
+                             welderDockerCompose: String,
                              proxySiteConf: String,
                              jupyterServerName: String,
                              rstudioServerName: String,
@@ -236,8 +238,7 @@ case class ClusterInitValues(googleProject: String,
                              jupyterCombinedExtensions: String,
                              jupyterNotebookConfigUri: String,
                              jupyterLabExtensions: String,
-                             defaultClientId: String,
-                             welderDockerImage: String
+                             defaultClientId: String
                             ){
   def toMap: Map[String, String] = this.getClass.getDeclaredFields.map(_.getName).zip(this.productIterator.to).toMap.mapValues(_.toString)}
 
@@ -254,12 +255,14 @@ object ClusterInitValues {
       clusterImages.find(_.tool == Jupyter).map(_.dockerImage).getOrElse(""),
       clusterImages.find(_.tool == RStudio).map(_.dockerImage).getOrElse(""),
       proxyConfig.jupyterProxyDockerImage,
+      dataprocConfig.welderDockerImage,
       GcsPath(initBucketName, GcsObjectName(clusterFilesConfig.jupyterServerCrt.getName)).toUri,
       GcsPath(initBucketName, GcsObjectName(clusterFilesConfig.jupyterServerKey.getName)).toUri,
       GcsPath(initBucketName, GcsObjectName(clusterFilesConfig.jupyterRootCaPem.getName)).toUri,
       GcsPath(initBucketName, GcsObjectName(clusterResourcesConfig.jupyterDockerCompose.value)).toUri,
       GcsPath(initBucketName, GcsObjectName(clusterResourcesConfig.rstudioDockerCompose.value)).toUri,
       GcsPath(initBucketName, GcsObjectName(clusterResourcesConfig.proxyDockerCompose.value)).toUri,
+      GcsPath(initBucketName, GcsObjectName(clusterResourcesConfig.welderDockerCompose.value)).toUri,
       GcsPath(initBucketName, GcsObjectName(clusterResourcesConfig.proxySiteConf.value)).toUri,
       dataprocConfig.jupyterServerName,
       dataprocConfig.rstudioServerName,
@@ -278,7 +281,7 @@ object ClusterInitValues {
       GcsPath(initBucketName, GcsObjectName(clusterResourcesConfig.jupyterNotebookConfigUri.value)).toUri,
       clusterRequest.userJupyterExtensionConfig.map(x => x.labExtensions.values.mkString(" ")).getOrElse(""),
       clusterRequest.defaultClientId.getOrElse(""),
-      dataprocConfig.welderDockerImage
+
     )
 }
 

@@ -63,7 +63,7 @@ object Dependencies {
   val akkaHttpTestKit: ModuleID =   "com.typesafe.akka"   %%  "akka-http-testkit"    % akkaHttpV % "test"
 
   val googleDataproc: ModuleID =    "com.google.apis"     % "google-api-services-dataproc" % s"v1-rev91-$googleV" excludeAll(excludeGuavaJDK5, excludeJacksonCore, excludeFindbugsJsr, excludeHttpComponent)
-  val googleRpc: ModuleID = "io.grpc" % "grpc-core" % "1.12.0" excludeAll(excludeGuava, excludeGson, excludeFindbugsJsr)
+  val googleRpc: ModuleID = "io.grpc" % "grpc-core" % "1.22.1" excludeAll(excludeGuava, excludeGson, excludeFindbugsJsr)
   val googleOAuth2: ModuleID = "com.google.auth" % "google-auth-library-oauth2-http" % "0.9.1" excludeAll(excludeGuava, excludeFindbugsJsr, excludeGoogleApiClient, excludeGoogleApiClientJackson2, excludeGoogleHttpClient, excludeHttpComponent)
   val googleSourceRepositories: ModuleID = "com.google.apis" % "google-api-services-sourcerepo" % s"v1-rev21-$googleV" excludeAll(excludeGuavaJDK5)
 
@@ -90,7 +90,7 @@ object Dependencies {
   val mysql: ModuleID =     "mysql"               % "mysql-connector-java"  % "8.0.11"
   val liquibase: ModuleID = "org.liquibase"       % "liquibase-core"        % "3.5.3"
   val sealerate: ModuleID = "ca.mrvisser" %% "sealerate" % "0.0.5"
-  val googleCloudNio: ModuleID = "com.google.cloud" % "google-cloud-nio" % "0.71.0-alpha" % "test" // brought in for FakeStorageInterpreter
+  val googleCloudNio: ModuleID = "com.google.cloud" % "google-cloud-nio" % "0.107.0-alpha" % "test" // brought in for FakeStorageInterpreter
 
   val rootDependencies = Seq(
     // proactively pull in latest versions of Jackson libs, instead of relying on the versions
@@ -180,10 +180,10 @@ object Dependencies {
     "com.typesafe.akka"   %%  "akka-testkit"        % akkaV     % "test",
     "com.typesafe.akka"   %%  "akka-slf4j"          % akkaV,
     "org.scalatest"       %%  "scalatest"           % "3.0.5"   % "test",
-    "org.seleniumhq.selenium" % "selenium-java"     % "3.14.0" % "test",
+    "org.seleniumhq.selenium" % "selenium-java"     % "3.141.59" % "test",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.8.0",
     "org.apache.commons" % "commons-text"           % "1.2",
-    "io.grpc" % "grpc-core" % "1.12.0" excludeAll(excludeGuava),
+    googleRpc,
 
     workbenchUtil,
     workbenchModel,
@@ -191,6 +191,7 @@ object Dependencies {
     workbenchGoogle,
     workbenchGoogle2,
     workbenchServiceTest,
+    googleCloudNio,
 
     // required by workbenchGoogle
     "com.typesafe.akka" %% "akka-http-spray-json" % "10.0.6" % "provided"

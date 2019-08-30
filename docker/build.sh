@@ -195,7 +195,6 @@ function docker_cmd()
         fi
 
         docker build -t "${DEFAULT_IMAGE}:${DOCKER_TAG}" .
-        cd automation
         echo "building $TESTS_IMAGE docker image..."
         docker build -f Dockerfile-tests -t "${TESTS_IMAGE}:${DOCKER_TAG_TESTS}" .
         cd ..

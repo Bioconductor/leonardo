@@ -1,0 +1,11 @@
+FROM bigtruedata/sbt
+
+COPY automation /app/automation
+COPY http /app/http
+COPY project /app/project
+COPY build.sbt /app
+COPY automation-tests-docker-entrypoint.sh /app
+
+WORKDIR /app
+
+ENTRYPOINT ["bash", "automation-tests-docker-entrypoint.sh"]

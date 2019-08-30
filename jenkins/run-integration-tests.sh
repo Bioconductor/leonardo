@@ -14,7 +14,6 @@ SCALATESTS=automation-leo
 VAULT_TOKEN=$(cat /etc/vault-token-dsde)
 
 # build test docker image
-cd ../automation
 docker build -f Dockerfile-tests -t $SCALATESTS .
 
 # run tests

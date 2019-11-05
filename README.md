@@ -48,6 +48,18 @@ Ensure docker is running. Spin up MySQL locally:
 ```
 $ ./docker/run-mysql.sh start leonardo  
 ```
+
+Note, if you see error like
+```
+Warning: Using a password on the command line interface can be insecure.
+ERROR 2003 (HY000): Can't connect to MySQL server on 'mysql' (113)
+Warning: Using a password on the command line interface can be insecure.
+ERROR 2003 (HY000): Can't connect to MySQL server on 'mysql' (113)
+Warning: Using a password on the command line interface can be insecure.
+ERROR 2003 (HY000): Can't connect to MySQL server on 'mysql' (113)
+```
+Run `docker system prune -a`
+
 Build Leonardo and run all unit tests.
 ```
 export SBT_OPTS="-Xmx2G -Xms1G -Dmysql.host=localhost -Dmysql.port=3311"
@@ -67,6 +79,11 @@ Once you're done, tear down MySQL.
 ```
 ./docker/run-mysql.sh stop leonardo
 ```
+
+## Run scalafmt
+Learn more about [scalafmt](https://scalameta.org/scalafmt/docs/installation.html)
+- Format main code `sbt scalafmt`
+- Format testing code `sbt test:scalafmt`
 
 ## Building Leonardo docker image
 

@@ -4,23 +4,23 @@ import java.sql.SQLTimeoutException
 
 import cats.effect.{ContextShift, IO}
 import com.google.common.base.Throwables
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
-import liquibase.{Contexts, Liquibase}
 import liquibase.database.jvm.JdbcConnection
 import liquibase.resource.{ClassLoaderResourceAccessor, ResourceAccessor}
+import liquibase.{Contexts, Liquibase}
 import org.broadinstitute.dsde.workbench.leonardo.config.LiquibaseConfig
 import slick.basic.DatabaseConfig
 import slick.dbio.DBIO
 import slick.jdbc.{JdbcBackend, JdbcDataSource, JdbcProfile, TransactionIsolation}
-import net.ceedubs.ficus.Ficus._
 import sun.security.provider.certpath.SunCertPathBuilderException
 
 import scala.concurrent.{ExecutionContext, Future}
 
 object DbReference extends LazyLogging {
 
-  private def initWithLiquibase(dataSource: JdbcDataSource, liquibaseConfig: LiquibaseConfig, changelogParameters: Map[String, AnyRef] = Map.empty): Unit = {
+  private def initWithLiquibase(dataSource: JdbcDataSource,
+                                liquibaseConfig: LiquibaseConfig,
+                                changelogParameters: Map[String, AnyRef] = Map.empty): Unit = {
     val dbConnection = dataSource.createConnection()
     try {
       val liquibaseConnection = new JdbcConnection(dbConnection)
@@ -36,7 +36,9 @@ object DbReference extends LazyLogging {
           val k = "javax.net.ssl.keyStore"
           if (System.getProperty(k) == null) {
             logger.warn("************")
-            logger.warn(s"The system property '${k}' is null. This is likely the cause of the database connection failure.")
+            logger.warn(
+              s"The system property '${k}' is null. This is likely the cause of the database connection failure."
+            )
             logger.warn("************")
           }
         }
@@ -46,29 +48,34 @@ object DbReference extends LazyLogging {
     }
   }
 
-  def init(config: Config)(implicit executionContext: ExecutionContext): DbReference = {
-    val dbConfig = DatabaseConfig.forConfig[JdbcProfile]("mysql", config)
+  def init(config: LiquibaseConfig)(implicit executionContext: ExecutionContext): DbReference = {
+    val dbConfig =
+      DatabaseConfig.forConfig[JdbcProfile]("mysql", org.broadinstitute.dsde.workbench.leonardo.config.Config.config)
 
-    val liquibaseConf = config.as[LiquibaseConfig]("liquibase")
-    if (liquibaseConf.initWithLiquibase)
-      initWithLiquibase(dbConfig.db.source, liquibaseConf)
+    if (config.initWithLiquibase)
+      initWithLiquibase(dbConfig.db.source, config)
 
     DbReference(dbConfig)
   }
 }
 
-case class DbReference(private val dbConfig: DatabaseConfig[JdbcProfile])(implicit val executionContext: ExecutionContext) {
+case class DbReference(private val dbConfig: DatabaseConfig[JdbcProfile])(
+  implicit val executionContext: ExecutionContext
+) {
   val dataAccess = new DataAccess(dbConfig.profile)
   val database: JdbcBackend#DatabaseDef = dbConfig.db
 
-  def inTransaction[T](f: (DataAccess) => DBIO[T], isolationLevel: TransactionIsolation = TransactionIsolation.RepeatableRead): Future[T] = {
+  def inTransaction[T](f: (DataAccess) => DBIO[T],
+                       isolationLevel: TransactionIsolation = TransactionIsolation.RepeatableRead): Future[T] = {
     import dataAccess.profile.api._
     database.run(f(dataAccess).transactionally.withTransactionIsolation(isolationLevel))
   }
 
-  def inTransactionIO[T](f: (DataAccess) => DBIO[T], isolationLevel: TransactionIsolation = TransactionIsolation.RepeatableRead)(implicit cs: ContextShift[IO]): IO[T] = {
+  def inTransactionIO[T](
+    f: (DataAccess) => DBIO[T],
+    isolationLevel: TransactionIsolation = TransactionIsolation.RepeatableRead
+  )(implicit cs: ContextShift[IO]): IO[T] =
     IO.fromFuture(IO(inTransaction(f, isolationLevel)))
-  }
 }
 
 class DataAccess(val profile: JdbcProfile)(implicit val executionContext: ExecutionContext) extends AllComponents {

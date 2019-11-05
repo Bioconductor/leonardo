@@ -20,7 +20,10 @@ export WELDER_ENABLED=$(welderEnabled)
 export DEPLOY_WELDER=$(deployWelder)
 export UPDATE_WELDER=$(updateWelder)
 export WELDER_DOCKER_IMAGE=$(welderDockerImage)
+export DISABLE_DELOCALIZATION=$(disableDelocalization)
+export STAGING_BUCKET=$(stagingBucketName)
 
+# TODO: remove this block once data syncing is rolled out to Terra
 if [ "$DEPLOY_WELDER" == "true" ] ; then
     echo "Deploying Welder on cluster $GOOGLE_PROJECT / $CLUSTER_NAME..."
 
@@ -29,11 +32,18 @@ if [ "$DEPLOY_WELDER" == "true" ] ; then
     docker-compose -f /etc/welder-docker-compose.yaml up -d
 
     # Move existing notebooks to new notebooks dir
-    docker exec -i $JUPYTER_SERVER_NAME bash -c "ls -I notebooks /home/jupyter-user | xargs -d '\n'  -I file mv file $NOTEBOOKS_DIR"
+    docker exec -i $JUPYTER_SERVER_NAME bash -c "ls -I notebooks -I miniconda /home/jupyter-user | xargs -d '\n'  -I file mv file $NOTEBOOKS_DIR"
 
     # Enable welder in /etc/jupyter/nbconfig/notebook.json (which powers the front-end extensions like edit.js and safe.js)
     docker exec -u root -i $JUPYTER_SERVER_NAME bash -c \
-      "jq '.welderEnabled=\"true\"' /etc/jupyter/nbconfig/notebook.json > /etc/jupyter/nbconfig/notebook.json.tmp && mv /etc/jupyter/nbconfig/notebook.json.tmp /etc/jupyter/nbconfig/notebook.json"
+      "test -f /etc/jupyter/nbconfig/notebook.json && jq '.welderEnabled=\"true\"' /etc/jupyter/nbconfig/notebook.json > /etc/jupyter/nbconfig/notebook.json.tmp && mv /etc/jupyter/nbconfig/notebook.json.tmp /etc/jupyter/nbconfig/notebook.json || true"
+fi
+
+# TODO: remove this block once data syncing is rolled out to Terra
+if [ "$DISABLE_DELOCALIZATION" == "true" ] ; then
+    echo "Disabling localization on cluster $GOOGLE_PROJECT / $CLUSTER_NAME..."
+
+    docker exec -i jupyter-server bash -c "find /home/jupyter-user -name .cache -prune -or -name .delocalize.json -exec rm -f {} \;"
 fi
 
 if [ "$UPDATE_WELDER" == "true" ] ; then
@@ -50,6 +60,10 @@ docker exec -d $JUPYTER_SERVER_NAME /bin/bash -c "export WELDER_ENABLED=$WELDER_
 
 # Start welder, if enabled
 if [ "$WELDER_ENABLED" == "true" ] ; then
+    # fix for https://broadworkbench.atlassian.net/browse/IA-1453
+    # TODO: remove this when we stop supporting the legacy docker image
+    docker exec -u root jupyter-server sed -i -e 's/export WORKSPACE_NAME=.*/export WORKSPACE_NAME="$(basename "$(dirname "$(pwd)")")"/' /etc/jupyter/scripts/kernel/kernel_bootstrap.sh
+
     echo "Starting Welder on cluster $GOOGLE_PROJECT / $CLUSTER_NAME..."
-    docker exec -d $WELDER_SERVER_NAME /opt/docker/bin/entrypoint.sh
+    docker exec -d $WELDER_SERVER_NAME /bin/bash -c "export STAGING_BUCKET=$STAGING_BUCKET && /opt/docker/bin/entrypoint.sh"
 fi

@@ -6,12 +6,11 @@ import org.broadinstitute.dsde.workbench.auth.AuthToken
 import org.broadinstitute.dsde.workbench.model.google.GoogleProject
 import org.broadinstitute.dsde.workbench.leonardo.GPAllocFixtureSpec._
 import org.broadinstitute.dsde.workbench.model.WorkbenchEmail
-import org.scalatest.{BeforeAndAfterAll, Outcome, fixture}
-
+import org.scalatest.{fixture, BeforeAndAfterAll, Outcome}
 
 /**
-  * trait BeforeAndAfterAll - One cluster per Scalatest Spec.
-  */
+ * trait BeforeAndAfterAll - One cluster per Scalatest Spec.
+ */
 abstract class ClusterFixtureSpec extends fixture.FreeSpec with BeforeAndAfterAll with LeonardoTestUtils {
 
   implicit val ronToken: AuthToken = ronAuthToken
@@ -27,21 +26,32 @@ abstract class ClusterFixtureSpec extends fixture.FreeSpec with BeforeAndAfterAl
   //  debug = true
   //  mockedCluster = mockCluster("gpalloc-dev-master-0h7pzni","automation-test-apm25lvlz")
   val debug: Boolean = false //if true, will not spin up and tear down a cluster on each test. Used in conjunction with mockedCluster
-  var mockedCluster: Cluster = _ // mockCluster("gpalloc-dev-master-0dkewwf", "automation-test-aktfcd0cz") //_ //must specify a google project name and cluster name via the mockCluster utility method in NotebookTestUtils
+  var mockedCluster
+    : Cluster = _ //mockCluster("gpalloc-dev-master-0wmkqka", "automation-test-adhkmuanz") //_ //must specify a google project name and cluster name via the mockCluster utility method in NotebookTestUtils
 
-  def mockCluster(googleProject: String, clusterName: String): Cluster = {
-    Cluster(ClusterName(clusterName), java.util.UUID.randomUUID(), GoogleProject(googleProject),
-      ServiceAccountInfo(Map()), MachineConfig(), new java.net.URL("https://FAKE/URL/IF_YOU_SEE_THIS_INVESTIGATE_YOUR_USAGE_OF_MOCKCLUSTER_METHOD/"), OperationName(""), ClusterStatus.Running, None, WorkbenchEmail(""), Instant.now(), None, Map(), None, None, None, List(), Instant.now(), None, false, Set())
-  }
+  def mockCluster(googleProject: String, clusterName: String): Cluster =
+    Cluster(
+      ClusterName(clusterName),
+      GoogleProject(googleProject),
+      ServiceAccountInfo(None, None),
+      MachineConfig(),
+      ClusterStatus.Running,
+      WorkbenchEmail(""),
+      Map(),
+      None,
+      List(),
+      Instant.now(),
+      false
+    )
 
   /**
-    * See
-    *  https://www.artima.com/docs-scalatest-2.0.M5/org/scalatest/FreeSpec.html
-    *   Section: "Overriding withFixture(OneArgTest)"
-    *
-    * Claim a billing project for project owner
-    * @param billingProject
-    */
+   * See
+   *  https://www.artima.com/docs-scalatest-2.0.M5/org/scalatest/FreeSpec.html
+   *   Section: "Overriding withFixture(OneArgTest)"
+   *
+   * Claim a billing project for project owner
+   * @param billingProject
+   */
   case class ClusterFixture(cluster: Cluster)
 
   override type FixtureParam = ClusterFixture
@@ -55,29 +65,30 @@ abstract class ClusterFixtureSpec extends fixture.FreeSpec with BeforeAndAfterAl
   }
 
   /**
-    * Create new cluster by Ron with all default settings
-    */
+   * Create new cluster by Ron with all default settings
+   */
   def createRonCluster(billingProject: GoogleProject): Unit = {
     logger.info(s"Creating cluster for cluster fixture tests: ${getClass.getSimpleName}")
     ronCluster = createNewCluster(billingProject, request = getClusterRequest())(ronAuthToken)
   }
 
   def getClusterRequest(): ClusterRequest = {
-    val machineConfig = Some(MachineConfig(
-      masterMachineType = Some("n1-standard-8"),
-      workerMachineType = Some("n1-standard-8")
-    ))
+    val machineConfig = Some(
+      MachineConfig(
+        masterMachineType = Some("n1-standard-8"),
+        workerMachineType = Some("n1-standard-8")
+      )
+    )
 
-    ClusterRequest(
-      machineConfig = machineConfig,
-      enableWelder = Some(enableWelder),
-      jupyterDockerImage = jupyterDockerImage,
-      autopause = Some(false))
+    ClusterRequest(machineConfig = machineConfig,
+                   enableWelder = Some(enableWelder),
+                   jupyterDockerImage = jupyterDockerImage,
+                   autopause = Some(false))
   }
 
   /**
-    * Delete cluster without monitoring that's owned by Ron
-    */
+   * Delete cluster without monitoring that's owned by Ron
+   */
   def deleteRonCluster(billingProject: GoogleProject, monitoringDelete: Boolean = false): Unit = {
     logger.info(s"Deleting cluster for cluster fixture tests: ${getClass.getSimpleName}")
     deleteCluster(billingProject, ronCluster.clusterName, monitoringDelete)(ronAuthToken)
@@ -89,7 +100,7 @@ abstract class ClusterFixtureSpec extends fixture.FreeSpec with BeforeAndAfterAl
     if (!debug) {
       sys.props.get(gpallocProjectKey) match {
         case Some(billingProject) => createRonCluster(GoogleProject(billingProject))
-        case None => throw new RuntimeException("leonardo.billingProject system property is not set")
+        case None                 => throw new RuntimeException("leonardo.billingProject system property is not set")
       }
     }
 
@@ -100,7 +111,7 @@ abstract class ClusterFixtureSpec extends fixture.FreeSpec with BeforeAndAfterAl
     if (!debug) {
       sys.props.get(gpallocProjectKey) match {
         case Some(billingProject) => deleteRonCluster(GoogleProject(billingProject))
-        case None => throw new RuntimeException("leonardo.billingProject system property is not set")
+        case None                 => throw new RuntimeException("leonardo.billingProject system property is not set")
       }
     }
     super.afterAll()

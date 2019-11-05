@@ -3,116 +3,224 @@ package org.broadinstitute.dsde.workbench.leonardo
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.stream.ActorMaterializer
-import cats.effect.{ExitCode, IO, IOApp, Resource}
+import cats.effect.concurrent.Semaphore
+import cats.effect.{Blocker, ConcurrentEffect, ContextShift, ExitCode, IO, IOApp, Resource, Timer}
 import cats.implicits._
-import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.LazyLogging
-import io.chrisdavenport.linebacker.Linebacker
+import com.typesafe.sslconfig.akka.AkkaSSLConfig
+import com.typesafe.sslconfig.akka.util.AkkaLoggerFactory
+import com.typesafe.sslconfig.ssl.ConfigSSLContextBuilder
 import io.chrisdavenport.log4cats.Logger
 import io.chrisdavenport.log4cats.slf4j.Slf4jLogger
-import net.ceedubs.ficus.Ficus._
 import org.broadinstitute.dsde.workbench.google.GoogleCredentialModes.{Pem, Token}
-import org.broadinstitute.dsde.workbench.google.{GoogleStorageDAO, HttpGoogleIamDAO, HttpGoogleProjectDAO, HttpGoogleStorageDAO}
+import org.broadinstitute.dsde.workbench.google.{
+  GoogleStorageDAO,
+  HttpGoogleIamDAO,
+  HttpGoogleProjectDAO,
+  HttpGoogleStorageDAO
+}
 import org.broadinstitute.dsde.workbench.google2.GoogleStorageService
 import org.broadinstitute.dsde.workbench.leonardo.api.{LeoRoutes, StandardUserInfoDirectives}
-import org.broadinstitute.dsde.workbench.leonardo.auth.{LeoAuthProviderHelper, ServiceAccountProviderHelper}
-import org.broadinstitute.dsde.workbench.leonardo.config.{AutoFreezeConfig, ClusterBucketConfig, ClusterDefaultsConfig, ClusterDnsCacheConfig, ClusterFilesConfig, ClusterResourcesConfig, ClusterToolConfig, DataprocConfig, LeoExecutionModeConfig, MonitorConfig, ProxyConfig, SamConfig, SwaggerConfig, ZombieClusterConfig}
-import org.broadinstitute.dsde.workbench.leonardo.dao.google.HttpGoogleComputeDAO
-import org.broadinstitute.dsde.workbench.leonardo.dao.{HttpJupyterDAO, HttpRStudioDAO, HttpSamDAO}
+import org.broadinstitute.dsde.workbench.leonardo.auth.sam.{PetClusterServiceAccountProvider, SamAuthProvider}
+import org.broadinstitute.dsde.workbench.leonardo.config.Config._
+import org.broadinstitute.dsde.workbench.leonardo.dao._
+import org.broadinstitute.dsde.workbench.leonardo.dao.google.{HttpGoogleComputeDAO, HttpGoogleDataprocDAO}
 import org.broadinstitute.dsde.workbench.leonardo.db.DbReference
 import org.broadinstitute.dsde.workbench.leonardo.dns.ClusterDnsCache
-import org.broadinstitute.dsde.workbench.leonardo.dao.HttpWelderDAO
-import org.broadinstitute.dsde.workbench.leonardo.dao.google.HttpGoogleDataprocDAO
-import org.broadinstitute.dsde.workbench.leonardo.monitor.ClusterToolMonitor
-import org.broadinstitute.dsde.workbench.leonardo.model.ClusterTool
+import org.broadinstitute.dsde.workbench.leonardo.model.LeoAuthProvider
 import org.broadinstitute.dsde.workbench.leonardo.model.google.NetworkTag
-import org.broadinstitute.dsde.workbench.leonardo.monitor.{ClusterDateAccessedActor, ClusterMonitorSupervisor, ZombieClusterMonitor}
+import org.broadinstitute.dsde.workbench.leonardo.monitor.{
+  ClusterDateAccessedActor,
+  ClusterMonitorSupervisor,
+  ClusterToolMonitor,
+  ZombieClusterMonitor
+}
 import org.broadinstitute.dsde.workbench.leonardo.service.{LeonardoService, ProxyService, StatusService}
 import org.broadinstitute.dsde.workbench.leonardo.util.{BucketHelper, ClusterHelper}
+import org.broadinstitute.dsde.workbench.newrelic.NewRelicMetrics
+import org.broadinstitute.dsde.workbench.util.ExecutionContexts
+import org.http4s.client.blaze
+import org.http4s.client.middleware.{Retry, RetryPolicy, Logger => Http4sLogger}
+
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
 
 object Boot extends IOApp with LazyLogging {
   private def startup(): IO[Unit] = {
-    val config = ConfigFactory.parseResources("leonardo.conf").withFallback(ConfigFactory.load())
-    val dataprocConfig = config.as[DataprocConfig]("dataproc")
-    val proxyConfig = config.as[ProxyConfig]("proxy")
-    val swaggerConfig = config.as[SwaggerConfig]("swagger")
-    val clusterFilesConfig = config.as[ClusterFilesConfig]("clusterFiles")
-    val clusterResourcesConfig = config.as[ClusterResourcesConfig]("clusterResources")
-    val clusterDefaultsConfig = config.as[ClusterDefaultsConfig]("clusterDefaults")
-    val monitorConfig = config.as[MonitorConfig]("monitor")
-    val samConfig = config.as[SamConfig]("sam")
-    val autoFreezeConfig = config.as[AutoFreezeConfig]("autoFreeze")
-    val contentSecurityPolicy = config.as[Option[String]]("jupyterConfig.contentSecurityPolicy").getOrElse("default-src: 'self'")
-    val zombieClusterMonitorConfig = config.as[ZombieClusterConfig]("zombieClusterMonitor")
-    val clusterToolMonitorConfig = config.as[ClusterToolConfig](path = "clusterToolMonitor")
-    val clusterDnsCacheConfig = config.as[ClusterDnsCacheConfig]("clusterDnsCache")
-    val leoExecutionModeConfig = config.as[LeoExecutionModeConfig]("leoExecutionMode")
-    val clusterBucketConfig = config.as[ClusterBucketConfig]("clusterBucket")
-
     // we need an ActorSystem to host our application in
     implicit val system = ActorSystem("leonardo")
     implicit val materializer = ActorMaterializer()
     import system.dispatcher
 
-    val serviceAccountProviderClass = config.as[String]("serviceAccounts.providerClass")
-    val serviceAccountConfig = config.getConfig("serviceAccounts.providerConfig")
-    val serviceAccountProvider = ServiceAccountProviderHelper.create(serviceAccountProviderClass, serviceAccountConfig)
-
-    val leoServiceAccountJsonFile = config.as[String]("google.leoServiceAccountJsonFile")
-
-    val authProviderClass = config.as[String]("auth.providerClass")
-    val authConfig = config.getConfig("auth.providerConfig")
-    val authProvider = LeoAuthProviderHelper.create(authProviderClass, authConfig, serviceAccountProvider)
-
-    val dbRef = DbReference.init(config)
-    system.registerOnTermination {
-      dbRef.database.close()
-    }
-
     val petGoogleStorageDAO: String => GoogleStorageDAO = token => {
       new HttpGoogleStorageDAO(dataprocConfig.applicationName, Token(() => token), "google")
     }
 
-    val (leoServiceAccountEmail, leoServiceAccountPemFile) = serviceAccountProvider.getLeoServiceAccountAndKey
-    val gdDAO = new HttpGoogleDataprocDAO(dataprocConfig.applicationName, Pem(leoServiceAccountEmail, leoServiceAccountPemFile), "google", NetworkTag(dataprocConfig.networkTag), dataprocConfig.dataprocDefaultRegion, dataprocConfig.dataprocZone, dataprocConfig.defaultExecutionTimeout)
-    val googleComputeDAO = new HttpGoogleComputeDAO(dataprocConfig.applicationName, Pem(leoServiceAccountEmail, leoServiceAccountPemFile), "google")
-    val googleIamDAO = new HttpGoogleIamDAO(dataprocConfig.applicationName, Pem(leoServiceAccountEmail, leoServiceAccountPemFile), "google")
-    val googleStorageDAO = new HttpGoogleStorageDAO(dataprocConfig.applicationName, Pem(leoServiceAccountEmail, leoServiceAccountPemFile), "google")
-    val googleProjectDAO = new HttpGoogleProjectDAO(dataprocConfig.applicationName, Pem(leoServiceAccountEmail, leoServiceAccountPemFile), "google")
-    val clusterDnsCache = new ClusterDnsCache(proxyConfig, dbRef, clusterDnsCacheConfig)
-    val bucketHelper = new BucketHelper(dataprocConfig, gdDAO, googleComputeDAO, googleStorageDAO, serviceAccountProvider)
-    val clusterHelper = new ClusterHelper(dbRef, dataprocConfig, gdDAO, googleComputeDAO, googleIamDAO)
+    val pem = Pem(serviceAccountProviderConfig.leoServiceAccount, serviceAccountProviderConfig.leoPemFile)
+    val googleStorageDAO = new HttpGoogleStorageDAO(dataprocConfig.applicationName, pem, "google")
+    val googleProjectDAO = new HttpGoogleProjectDAO(dataprocConfig.applicationName, pem, "google")
     implicit def unsafeLogger = Slf4jLogger.getLogger[IO]
-    implicit val lineBacker = Linebacker.fromExecutionContext[IO](scala.concurrent.ExecutionContext.global)
 
-    createDependencies(leoServiceAccountJsonFile).use {
-      appDependencies =>
-        val welderDao = new HttpWelderDAO(clusterDnsCache)
-        val leonardoService = new LeonardoService(dataprocConfig, welderDao, clusterFilesConfig, clusterResourcesConfig, clusterDefaultsConfig, proxyConfig, swaggerConfig, autoFreezeConfig, gdDAO, googleComputeDAO, googleProjectDAO, googleStorageDAO, petGoogleStorageDAO, dbRef, authProvider, serviceAccountProvider, bucketHelper, clusterHelper, contentSecurityPolicy)
-        if(leoExecutionModeConfig.backLeo) {
-          val jupyterDAO = new HttpJupyterDAO(clusterDnsCache)
-          val rstudioDAO = new HttpRStudioDAO(clusterDnsCache)
-          system.actorOf(ClusterMonitorSupervisor.props(monitorConfig, dataprocConfig, clusterBucketConfig, gdDAO, googleComputeDAO, googleStorageDAO, appDependencies.google2StorageDao, dbRef, authProvider, autoFreezeConfig, jupyterDAO, rstudioDAO, welderDao, leonardoService, clusterHelper))
-          system.actorOf(ZombieClusterMonitor.props(zombieClusterMonitorConfig, gdDAO, googleProjectDAO, dbRef))
-          system.actorOf(ClusterToolMonitor.props(clusterToolMonitorConfig, gdDAO, googleProjectDAO, dbRef, Map(ClusterTool.Jupyter ->  jupyterDAO, ClusterTool.Welder -> welderDao), Metrics.newRelic))
-        }
-        val samDAO = new HttpSamDAO(samConfig.server)
-        val clusterDateAccessedActor = system.actorOf(ClusterDateAccessedActor.props(autoFreezeConfig, dbRef))
-        val proxyService = new ProxyService(proxyConfig, gdDAO, dbRef, clusterDnsCache, authProvider, clusterDateAccessedActor)
-        val statusService = new StatusService(gdDAO, samDAO, dbRef, dataprocConfig)
-        val leoRoutes = new LeoRoutes(leonardoService, proxyService, statusService, swaggerConfig) with StandardUserInfoDirectives
-        IO.fromFuture(IO(Http().bindAndHandle(leoRoutes.route, "0.0.0.0", 8080)
-          .recover {
-            case t: Throwable =>
-              logger.error("FATAL - failure starting http server", t)
-              throw t
-          }.void))
+    createDependencies(leoServiceAccountJsonFile, pem).use { appDependencies =>
+      implicit val metrics = appDependencies.metrics
+      val serviceAccountProvider = new PetClusterServiceAccountProvider[IO](appDependencies.samDAO)
+      val authProvider: LeoAuthProvider[IO] =
+        new SamAuthProvider(appDependencies.samDAO, samAuthConfig, serviceAccountProvider)
+      val bucketHelper = new BucketHelper(dataprocConfig,
+                                          appDependencies.googleDataprocDAO,
+                                          appDependencies.googleComputeDAO,
+                                          googleStorageDAO,
+                                          serviceAccountProvider)
+      val leonardoService = new LeonardoService(dataprocConfig,
+                                                appDependencies.welderDAO,
+                                                clusterFilesConfig,
+                                                clusterResourcesConfig,
+                                                clusterDefaultsConfig,
+                                                proxyConfig,
+                                                swaggerConfig,
+                                                autoFreezeConfig,
+                                                appDependencies.googleDataprocDAO,
+                                                appDependencies.googleComputeDAO,
+                                                googleProjectDAO,
+                                                googleStorageDAO,
+                                                petGoogleStorageDAO,
+                                                appDependencies.dbReference,
+                                                authProvider,
+                                                serviceAccountProvider,
+                                                bucketHelper,
+                                                appDependencies.clusterHelper,
+                                                contentSecurityPolicy)
+      if (leoExecutionModeConfig.backLeo) {
+        val jupyterDAO = new HttpJupyterDAO(appDependencies.clusterDnsCache)
+        val rstudioDAO = new HttpRStudioDAO(appDependencies.clusterDnsCache)
+        implicit def clusterToolToToolDao =
+          ToolDAO.clusterToolToToolDao(jupyterDAO, appDependencies.welderDAO, rstudioDAO)
+        system.actorOf(
+          ClusterMonitorSupervisor.props(
+            monitorConfig,
+            dataprocConfig,
+            clusterBucketConfig,
+            appDependencies.googleDataprocDAO,
+            appDependencies.googleComputeDAO,
+            googleStorageDAO,
+            appDependencies.google2StorageDao,
+            appDependencies.dbReference,
+            authProvider,
+            autoFreezeConfig,
+            jupyterDAO,
+            rstudioDAO,
+            appDependencies.welderDAO,
+            leonardoService,
+            appDependencies.clusterHelper
+          )
+        )
+        system.actorOf(
+          ZombieClusterMonitor.props(zombieClusterMonitorConfig,
+                                     appDependencies.googleDataprocDAO,
+                                     googleProjectDAO,
+                                     appDependencies.dbReference)
+        )
+        system.actorOf(
+          ClusterToolMonitor.props(clusterToolMonitorConfig,
+                                   appDependencies.googleDataprocDAO,
+                                   googleProjectDAO,
+                                   appDependencies.dbReference,
+                                   appDependencies.metrics)
+        )
+      }
+      val clusterDateAccessedActor =
+        system.actorOf(ClusterDateAccessedActor.props(autoFreezeConfig, appDependencies.dbReference))
+      val proxyService = new ProxyService(proxyConfig,
+                                          appDependencies.googleDataprocDAO,
+                                          appDependencies.dbReference,
+                                          appDependencies.clusterDnsCache,
+                                          authProvider,
+                                          clusterDateAccessedActor)
+      val statusService = new StatusService(appDependencies.googleDataprocDAO,
+                                            appDependencies.samDAO,
+                                            appDependencies.dbReference,
+                                            dataprocConfig)
+      val leoRoutes = new LeoRoutes(leonardoService, proxyService, statusService, swaggerConfig)
+      with StandardUserInfoDirectives
+      IO.fromFuture(
+        IO(
+          Http()
+            .bindAndHandle(leoRoutes.route, "0.0.0.0", 8080)
+            .recover {
+              case t: Throwable =>
+                logger.error("FATAL - failure starting http server", t)
+                throw t
+            }
+            .void
+        )
+      ) >> IO.never
     }
   }
 
-  def createDependencies(pathToCredentialJson: String)(implicit logger: Logger[IO], linebacker: Linebacker[IO]): Resource[IO, AppDependencies] = GoogleStorageService.resource[IO](pathToCredentialJson).map(storage => AppDependencies(storage))
+  def createDependencies[F[_]: Logger: ContextShift: ConcurrentEffect: Timer](
+    pathToCredentialJson: String,
+    pem: Pem
+  )(implicit ec: ExecutionContext, as: ActorSystem): Resource[F, AppDependencies[F]] = {
+    implicit val metrics = NewRelicMetrics.fromNewRelic[F]("leonardo")
+
+    for {
+      blockingEc <- ExecutionContexts.cachedThreadPool[F]
+      semaphore <- Resource.liftF(Semaphore[F](255L))
+      blocker = Blocker.liftExecutionContext(blockingEc)
+      storage <- GoogleStorageService.resource[F](pathToCredentialJson, blocker, Some(semaphore))
+      retryPolicy = RetryPolicy[F](RetryPolicy.exponentialBackoff(30 seconds, 5))
+
+      sslContext = getSSLContext
+      httpClientWithCustomSSL <- blaze.BlazeClientBuilder[F](blockingEc, Some(sslContext)).resource
+      clientWithRetryWithCustomSSL = Retry(retryPolicy)(httpClientWithCustomSSL)
+      clientWithRetryAndLogging = Http4sLogger[F](logHeaders = true, logBody = false)(clientWithRetryWithCustomSSL)
+
+      samDao = new HttpSamDAO[F](clientWithRetryAndLogging, httpSamDap2Config)
+      dbRef <- Resource.make(ConcurrentEffect[F].delay(DbReference.init(liquibaseConfig)))(
+        db => ConcurrentEffect[F].delay(db.database.close)
+      )
+      clusterDnsCache = new ClusterDnsCache(proxyConfig, dbRef, clusterDnsCacheConfig)
+      welderDao = new HttpWelderDAO[F](clusterDnsCache, clientWithRetryAndLogging)
+
+      googleIamDAO = new HttpGoogleIamDAO(dataprocConfig.applicationName, pem, "google")
+      googleComputeDAO = new HttpGoogleComputeDAO(dataprocConfig.applicationName, pem, "google")
+      gdDAO = new HttpGoogleDataprocDAO(dataprocConfig.applicationName,
+                                        pem,
+                                        "google",
+                                        NetworkTag(dataprocConfig.networkTag),
+                                        dataprocConfig.dataprocDefaultRegion,
+                                        dataprocConfig.dataprocZone)
+      clusterHelper = new ClusterHelper(dbRef, dataprocConfig, gdDAO, googleComputeDAO, googleIamDAO)
+    } yield AppDependencies(storage,
+                            dbRef,
+                            clusterDnsCache,
+                            googleComputeDAO,
+                            gdDAO,
+                            samDao,
+                            welderDao,
+                            clusterHelper,
+                            metrics)
+  }
+
+  private def getSSLContext(implicit actorSystem: ActorSystem) = {
+    val akkaSSLConfig = AkkaSSLConfig()
+    val config = akkaSSLConfig.config
+    val logger = new AkkaLoggerFactory(actorSystem)
+    new ConfigSSLContextBuilder(logger,
+                                config,
+                                akkaSSLConfig.buildKeyManagerFactory(config),
+                                akkaSSLConfig.buildTrustManagerFactory(config)).build()
+  }
 
   override def run(args: List[String]): IO[ExitCode] = startup().as(ExitCode.Success)
 }
 
-final case class AppDependencies(google2StorageDao: GoogleStorageService[IO])
+final case class AppDependencies[F[_]](google2StorageDao: GoogleStorageService[F],
+                                       dbReference: DbReference,
+                                       clusterDnsCache: ClusterDnsCache,
+                                       googleComputeDAO: HttpGoogleComputeDAO,
+                                       googleDataprocDAO: HttpGoogleDataprocDAO,
+                                       samDAO: HttpSamDAO[F],
+                                       welderDAO: HttpWelderDAO[F],
+                                       clusterHelper: ClusterHelper,
+                                       metrics: NewRelicMetrics[F])
